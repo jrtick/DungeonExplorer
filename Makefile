@@ -1,6 +1,6 @@
 all: dungeon
 
-CC = g++
+CC = g++ -std=c++11
 DEBUG = -g -Wall
 IMAGE_LIBS = -ljpeg -lpng
 OPENGL_LIBS = -lGL -lGLU -lglut

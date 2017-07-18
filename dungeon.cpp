@@ -2,27 +2,103 @@
 #include <stdio.h>
 #include "ImageLoader.h"
 
+void checkError(){
+  GLenum errCode = glGetError();
+  if(errCode != GL_NO_ERROR){
+    printf("Error: %s\n",(char*) gluErrorString(errCode));
+  }
+}
 
-void draw(void) {
-  glClear(GL_COLOR_BUFFER_BIT);
+class Texture{
+public:
+  static int textureCount;
+  GLuint textureBinding;
+  int width,height,textureIdx,channels;
 
-  //draw textures first
-  glEnable(GL_TEXTURE_2D);
+  Texture(){ //default constructor does nothing
+    textureBinding = -1;
+  }
+
+  Texture(char* filename){
+    Image image = readImage(filename);
+    if(image.numComponents < 0){
+      printf("Image load failed\n");
+      textureBinding = -1;
+      return;
+    }else{
+      width = image.width;
+      height = image.height;
+      channels = (char)image.numComponents;
+    
+      textureIdx = Texture::textureCount++;
+      printf("%s has texture idx %d w/ res (%d,%d,%d)\n",filename,textureIdx,width,height,channels);
+      ///glActiveTexture(GL_TEXTURE0+textureIdx);
+
+      glGenTextures(1,&textureBinding);
+      glBindTexture(GL_TEXTURE_2D, textureBinding);
+      glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE , GL_MODULATE);
+
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,GL_REPEAT);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T,GL_REPEAT);
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); //when scaling down
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); //when scaling up
+      
+      glTexImage2D(GL_TEXTURE_2D, 0, (channels==3)? GL_RGB8 : GL_RGBA8,width,height,0,
+                    (channels==3)? GL_RGB : GL_RGBA, GL_UNSIGNED_BYTE, image.data);
+
+      /*gluBuild2DMipmaps(GL_TEXTURE_2D,
+          (channels==3)? GL_RGB8 : GL_RGBA8,width,height,
+          (channels==3)? GL_RGB : GL_RGBA, GL_UNSIGNED_BYTE, image.data);*/
+
+      image.close(); //no longer need its memory in sysmem now that it's in GPU
+      glBindTexture(GL_TEXTURE_2D,0); //unbind
+    }
+    checkError();
+  }
+
+  void activate(){
+    //glActiveTexture(GL_TEXTURE0+textureIdx);
+    glBindTexture(GL_TEXTURE_2D,textureBinding);
+    checkError();
+  }
+};
+int Texture::textureCount = 0;
+Texture brick1,brick2;
+
+struct GameState{
+  bool paused;
+  GameState(bool paused){
+    this->paused = paused;
+  }
+};
+GameState curState = GameState(true);
+
+void drawBoard(){
+  //glEnable(GL_TEXTURE_2D);
   glBegin(GL_QUADS);
     glTexCoord2d(0,0);glVertex2d(-1,-1);
     glTexCoord2d(1,0);glVertex2d(1,-1);
     glTexCoord2d(1,1);glVertex2d(1,1);
     glTexCoord2d(0,1);glVertex2d(-1,1);
   glEnd();
-  glDisable(GL_TEXTURE_2D);
+  //glDisable(GL_TEXTURE_2D);
+}
+void drawLoot(){}
+void drawMonsters(){}
+void drawPlayer(){}
+void drawGUI(){}
 
-  //draw nontextures
-  glBegin(GL_QUADS);
-    glVertex2d(-0.5,-0.5);
-    glVertex2d(0.5,-0.5);
-    glVertex2d(0.5,0.5);
-    glVertex2d(-0.5,0.5);
-  glEnd();
+void draw(void) {
+  glClear(GL_COLOR_BUFFER_BIT);
+
+  //if(!curState.paused){
+    drawBoard();
+    drawLoot();
+    drawMonsters();
+    drawPlayer();
+  //}else drawGUI();
 
   glutSwapBuffers();
 }
@@ -45,10 +121,15 @@ void keyPressed(unsigned char key, int mouseX, int mouseY){
     case 'q':
     case 'Q':
     case ESC:
-      printf("Exiting program...\n");
+      printf("Exiting program.\n");
       exit(0);
       break;
-     default:
+    case 'p':
+      curState.paused = !curState.paused;
+      if(curState.paused) brick1.activate();
+      else brick2.activate();
+      break;
+    default:
       printf("Warning: %c (%d) key not recognized.\n",key,(int)key);
   }
 }
@@ -94,25 +175,8 @@ int main(int argc, char **argv) {
   //glOrtho(0,resolution[0],resolution[1],0,-1,1);
 
   //load images
-  //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 0);
-  //glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR); //when scaling down
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR); //when scaling up
-
-  const char* filename = "textures/brick.jpg";
-  Image image = readImage((char*)filename);
-  if(image.numComponents < 0){
-    printf("Image load failed\n");
-    return -1;
-  }
-  printf("image dimensions = (%d,%d,%d)\n",image.width,image.height,image.numComponents);
-
-  //create texture
-  GLuint brickTexture;
-  glGenTextures(1,&brickTexture);
-  glBindTexture(GL_TEXTURE_2D, brickTexture);
-  gluBuild2DMipmaps(GL_TEXTURE_2D,(image.numComponents==3)? GL_RGB8 : GL_RGBA8,image.width,image.height,(image.numComponents==3)? GL_RGB : GL_RGBA,GL_UNSIGNED_BYTE,image.data);
-  image.close(); //no longer need its memory in sysmem 
+  brick1 = Texture((char*)"textures/brick.jpg");
+  brick2 = Texture((char*)"textures/brick.png");
 
   //setup callbacks
   glutReshapeFunc(onResize);

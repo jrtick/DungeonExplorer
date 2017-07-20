@@ -3,6 +3,16 @@
 #include <ctime>
 #include "Texture.h"
 
+struct V4{
+  float x,y,z,w;
+  V4(){}
+  V4(float x, float y, float z, float w){
+    this->x = x;
+    this->y = y;
+    this->z = z;
+    this->w = w;
+  }
+};
 
 
 struct GameState{
@@ -10,16 +20,20 @@ struct GameState{
   Point viewport[2];
   Texture brick1,brick2;
   SpriteSheet player;
+  Point playerPosition;
+  float playerRadius;
   int frameCount = 0;
   double fps = -1;
   bool fullscreen = false;
-  int resolution[2] = {1024,1024};
+  int resolution[2] = {512,512};
   std::clock_t starttime, lastCheck;
   GameState(bool paused){
     starttime = lastCheck = std::clock();
     this->paused = paused;
     viewport[0] = Point(0,0);
     viewport[1] = Point(100,100);
+    playerPosition = Point(50,50);
+    playerRadius = 10;
   }
 };
 GameState curState = GameState(true);
@@ -61,16 +75,6 @@ public:
 };
 Board board;
 
-struct V4{
-  float x,y,z,w;
-  V4(){}
-  V4(float x, float y, float z, float w){
-    this->x = x;
-    this->y = y;
-    this->z = z;
-    this->w = w;
-  }
-};
 void drawText(Point p, void* font, char* msg, V4 color){
   glColor4f(color.x,color.y,color.z,color.w);
   glRasterPos2f(p.x,p.y);
@@ -81,15 +85,21 @@ void drawText(Point p, void* font, char* msg, V4 color){
 void drawLoot(){}
 void drawMonsters(){}
 void drawPlayer(Point* viewport){
-    //Point min = viewport[0],
-    //       max = viewport[1];
-    //Point scale = Point(1.f/(max.x-min.x),1.f/(max.y-min.y));
-    curState.player.drawQuad(Point(-0.2,-0.2),Point(0.2,-0.2),Point(0.2,0.2),Point(-0.2,0.2),(curState.frameCount/5)%4);
+    Point min = viewport[0],
+           max = viewport[1];
+    Point scale = Point(1.f/(max.x-min.x),1.f/(max.y-min.y));
+    Point p1,p2,p3,p4;
+    p1 = p2 = p3 = p4 = curState.playerPosition;
+    p1 += Point(-curState.playerRadius,-curState.playerRadius);
+    p2 += Point(curState.playerRadius,-curState.playerRadius);
+    p3 += Point(curState.playerRadius,curState.playerRadius);
+    p4 += Point(-curState.playerRadius,curState.playerRadius);
+    curState.player.draw((p1-min)*scale*2-1,(p2-min)*scale*2-1,(p3-min)*scale*2-1,(p4-min)*scale*2-1);
 }
 void drawGUI(){
   char buf[128];
   sprintf(buf,"FPS: %.2f",curState.fps);
-  drawText(Point(-1,1-30.f/float(curState.resolution[1])),GLUT_BITMAP_TIMES_ROMAN_24, (char*)buf, V4(1,0,0,1));
+  drawText(Point(-1,1-50.f/float(curState.resolution[1])),GLUT_BITMAP_TIMES_ROMAN_24, (char*)buf, V4(0,0,1,1));
 }
 
 #define FRAMES_TO_AVERAGE 300
@@ -122,6 +132,18 @@ void keyPressed(unsigned char key, int mouseX, int mouseY){
         printf("undoing fullscreen.\n");
         glutReshapeWindow(curState.resolution[0],curState.resolution[1]);
       }
+      break;
+    case 'w':
+      curState.playerPosition.y++;
+      break;
+    case 's':
+      curState.playerPosition.y--;
+      break;
+    case 'a':
+      curState.playerPosition.x--;
+      break;
+    case 'd':
+      curState.playerPosition.x++;
       break;
     case 'q':
     case 'Q':
@@ -179,14 +201,17 @@ int main(int argc, char **argv) {
   curState.brick1 = Texture((char*)"textures/brick.jpg");
   curState.brick2 = Texture((char*)"textures/brick.png");
   curState.player = SpriteSheet((char*)"textures/player.png",1,5);
+
+  int animation[5] = {0,1,2,3,4};
+  curState.player.setAnimation(curState.player.addAnimation((int*)animation, 5,10));
   curState.brick1.activate(); //set default
 
   board = Board(1);
   Point bbox[4];
   bbox[0] = Point(0,0);
   bbox[1] = Point(100,0);
-  bbox[2] = Point(100,100);
-  bbox[3] = Point(0,100);
+  bbox[2] = Point(100,95);
+  bbox[3] = Point(0,95);
   board.setRoom(0,(Point*)bbox);
 
   //setup callbacks

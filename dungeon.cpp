@@ -1,7 +1,75 @@
 #include <GL/freeglut.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <ctime>
+#include <vector>
 #include "Texture.h"
+#include "Sounds.h"
+
+inline float unitRandom(){
+  return static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+}
+
+
+#define min(x,y) ((x<y)? x : y)
+#define max(x,y) ((x>y)? x : y)
+
+class Thing{
+public:
+  static std::vector<Thing*> thingList;
+  virtual void draw(Point* viewport){ }
+  Point bbox[2];
+  int idx = -1;
+  Thing(bool collideable = true){
+    if(collideable){
+      idx = thingList.size();
+      thingList.push_back(this);
+    }
+  }
+  int Collision(){
+    for(int i=0;i<(int)thingList.size();i++){
+      if(i == idx) continue;
+      else if(collides(this,thingList[i])) return i;
+    }
+  }
+  static bool collides(Thing* thing1, Thing* thing2){
+    //AABB collision detection
+    Point bbox1[2] = thing1->bbox;
+    Point bbox2[2] = thing2->bbox;
+    return (bbox1[0].x < bbox2[1].x && bbox1[1].x > bbox2[0].x && 
+            bbox1[0].y < bbox2[1].y && bbox1[1].y > bbox2[0].y);
+  }
+};
+std::vector<Thing*> Thing::thingList; //initialize
+
+class MoveableThing : public Thing{
+public:
+  MoveableThing() : Thing(){ }
+  SpriteSheet spritesheet;
+  void draw(Point* viewport){
+    Point min = viewport[0],
+          max = viewport[1];
+    Point scale = Point(1.f/(max.x-min.x),1.f/(max.y-min.y));
+    spritesheet.draw((bbox[0]                   -min)*scale*2-1,
+                     (Point(bbox[1].x,bbox[0].y)-min)*scale*2-1,
+                     (bbox[1]                   -min)*scale*2-1,
+                     (Point(bbox[0].x,bbox[1].y)-min)*scale*2-1);
+  }
+};
+class StationaryThing : public Thing{
+public:
+  StationaryThing() : Thing(){ }
+  Texture texture;
+  void draw(Point* viewport){
+    Point min = viewport[0],
+           max = viewport[1];
+    Point scale = Point(1.f/(max.x-min.x),1.f/(max.y-min.y));
+    texture.drawQuad((bbox[0]                   -min)*scale*2-1,
+                     (Point(bbox[1].x,bbox[0].y)-min)*scale*2-1,
+                     (bbox[1]                   -min)*scale*2-1,
+                     (Point(bbox[0].x,bbox[1].y)-min)*scale*2-1);
+  }
+};
 
 struct V4{
   float x,y,z,w;
@@ -15,53 +83,54 @@ struct V4{
 };
 
 
-struct GameState{
-  bool paused;
-  Point viewport[2];
-  Texture brick1,brick2;
-  SpriteSheet player;
-  Point playerPosition;
-  float playerRadius;
-  int frameCount = 0;
-  double fps = -1;
-  bool fullscreen = false;
-  int resolution[2] = {512,512};
-  std::clock_t starttime, lastCheck;
-  GameState(bool paused){
-    starttime = lastCheck = std::clock();
-    this->paused = paused;
-    viewport[0] = Point(0,0);
-    viewport[1] = Point(100,100);
-    playerPosition = Point(50,50);
-    playerRadius = 10;
-  }
-};
-GameState curState = GameState(true);
-
-class Room{
+class Room: public Thing{
 public:
-  Point bbox[4];
-  Room(){ }
+  static Texture brick;
+  Room() : Thing(false){ }
   void drawRoom(Point* viewport, bool tile=false){
     Point min = viewport[0],
            max = viewport[1];
     Point scale = Point(1.f/(max.x-min.x),1.f/(max.y-min.y));
     Point corners[4];
-    for(int i=0;i<4;i++)
-      corners[i] = Point(2*(bbox[i].x-min.x)*scale.x-1,
-                         2*(bbox[i].y-min.y)*scale.y-1);
-    curState.brick1.drawQuad(corners[0],corners[1],corners[2],corners[3],10);
+    corners[0] = (bbox[0]-min)*scale*2-1;
+    corners[1] = (Point(bbox[1].x,bbox[0].y)-min)*scale*2-1;
+    corners[2] = (bbox[1]-min)*scale*2-1;
+    corners[3] = (Point(bbox[0].x,bbox[1].y)-min)*scale*2-1;
+    brick.drawQuad(corners[0],corners[1],corners[2],corners[3],10);
+  }
+  void draw(Point* viewport){
+    drawRoom(viewport);
   }
 };
+Texture Room::brick; //empty initialization
+
 
 class Board{
 public:
   int numRooms = 0;
   Room* rooms = NULL;
+  Point minCoord = Point(0,0), maxCoord = Point(100,100);
   Board(){}
-  Board(int roomCount){
+  Board(int roomCount, bool autoGenerate=true){
     numRooms = roomCount;
     rooms = (Room*) malloc(sizeof(Room)*numRooms);
+    if(autoGenerate && roomCount>0){
+      Point p1 = minCoord + (maxCoord-minCoord)*Point(unitRandom(),unitRandom()),
+            p2 = minCoord + (maxCoord-minCoord)*Point(unitRandom(),unitRandom());
+      rooms[0].bbox[0] = Point(min(p1.x,p2.x),min(p1.y,p2.y));
+      rooms[0].bbox[1] = Point(max(p1.x,p2.x),max(p1.y,p2.y));
+      for(int i=1;i<roomCount;i++){ //attach new room to prev room
+        Point minPt = rooms[i-1].bbox[0],
+              maxPt = rooms[i-1].bbox[1];
+        p1 = minPt+(maxPt-minPt)*Point(unitRandom(),unitRandom());
+        p2 = minCoord + (maxCoord-minCoord)*Point(unitRandom(),unitRandom());
+        rooms[i].bbox[0] = Point(min(p1.x,p2.x),min(p1.y,p2.y));
+        rooms[i].bbox[1] = Point(max(p1.x,p2.x),max(p1.y,p2.y));
+      }
+
+      for(int i=0;i<roomCount;i++)
+        printf("Room %d: (%.2f,%.2f)<->(%.2f,%.2f)\n",i,rooms[i].bbox[0].x,rooms[i].bbox[0].y,rooms[i].bbox[1].x,rooms[i].bbox[1].y);
+    }
   }
   void setRoom(int roomIdx, Point* bbox){
     Point* coords = (Point*)&rooms[roomIdx].bbox;
@@ -72,8 +141,37 @@ public:
       rooms[i].drawRoom(viewport);
     }
   }
+  bool inBounds(Thing* thing){
+    for(int i=0;i<numRooms;i++){
+      if(Thing::collides(thing,&rooms[i])) return true;
+    }
+    return false;
+  }
 };
-Board board;
+
+struct GameState{
+  bool paused;
+  Point viewport[2];
+  MoveableThing player;
+  std::vector<StationaryThing> loot;
+  std::vector<MoveableThing> enemies;
+  int frameCount = 0;
+  double fps = -1;
+  bool fullscreen = false;
+  int resolution[2] = {512,512};
+  std::clock_t starttime, lastCheck;
+  Board board;
+  GameState(bool paused=true){
+    starttime = lastCheck = std::clock();
+    this->paused = paused;
+    viewport[0] = Point(0,0);
+    viewport[1] = Point(100,100);
+    player.bbox[0] = Point(40,40);
+    player.bbox[1] = Point(60,60);
+  }
+};
+
+GameState curState = GameState(true);
 
 void drawText(Point p, void* font, char* msg, V4 color){
   glColor4f(color.x,color.y,color.z,color.w);
@@ -82,8 +180,17 @@ void drawText(Point p, void* font, char* msg, V4 color){
   glColor4f(1,1,1,1); //set back to default
 }
 
-void drawLoot(){}
-void drawMonsters(){}
+void drawLoot(){
+  for(unsigned int i=0;i<curState.loot.size();i++){
+    curState.loot[i].draw((Point*)curState.viewport);
+  }
+}
+void drawMonsters(){
+  for(unsigned int i=0;i<curState.enemies.size();i++){
+    curState.enemies[i].draw((Point*)curState.viewport);
+  }
+}
+/*
 void drawPlayer(Point* viewport){
     Point min = viewport[0],
            max = viewport[1];
@@ -96,32 +203,59 @@ void drawPlayer(Point* viewport){
     p4 += Point(-curState.playerRadius,curState.playerRadius);
     curState.player.draw((p1-min)*scale*2-1,(p2-min)*scale*2-1,(p3-min)*scale*2-1,(p4-min)*scale*2-1);
 }
+*/
 void drawGUI(){
   char buf[128];
   sprintf(buf,"FPS: %.2f",curState.fps);
   drawText(Point(-1,1-50.f/float(curState.resolution[1])),GLUT_BITMAP_TIMES_ROMAN_24, (char*)buf, V4(0,0,1,1));
+
+  if(curState.paused){
+    sprintf(buf,"Game Paused. press P to unpause");
+    drawText(Point(-0.5,0),GLUT_BITMAP_TIMES_ROMAN_24,(char*)buf,V4(1,0,0,1));
+  }
 }
 
 #define FRAMES_TO_AVERAGE 300
 void draw(void) {
   glClear(GL_COLOR_BUFFER_BIT);
 
-    board.drawBoard((Point*)curState.viewport);
+  if(!curState.paused){//continue game
+    curState.board.drawBoard((Point*)curState.viewport);
     drawLoot();
     drawMonsters();
-    drawPlayer((Point*)curState.viewport);
-    drawGUI();
-    if((curState.frameCount++ % FRAMES_TO_AVERAGE) == 0){
-      std::clock_t curtime = std::clock();
-      double timePassed = (curtime - curState.lastCheck) / (double) CLOCKS_PER_SEC;
-      curState.fps = ((double) FRAMES_TO_AVERAGE) / timePassed;
-      curState.lastCheck = curtime;
-    }
-  glutSwapBuffers();
+    if(!curState.board.inBounds(&curState.player)){glColor3f(1,0,0);}
+    curState.player.draw((Point*)curState.viewport);//drawPlayer((Point*)curState.viewport);
+  }
+  drawGUI();
+
+  //calculate framerate
+  if((curState.frameCount++ % FRAMES_TO_AVERAGE) == 0){
+    std::clock_t curtime = std::clock();
+    double timePassed = (curtime - curState.lastCheck) / (double) CLOCKS_PER_SEC;
+    curState.fps = ((double) FRAMES_TO_AVERAGE) / timePassed;
+    curState.lastCheck = curtime;
+  }
+  glutSwapBuffers(); //display to window
 }
 
 #define ESC 27
+void keyPressedPaused(unsigned char key, int mouseX, int mouseY){
+  switch(key){
+    case 'q':
+    case 'Q':
+    case ESC:
+      printf("Exiting program.\n");
+      exit(0);
+      break;
+    case 'p':
+      curState.paused = !curState.paused;
+      break;
+    default:
+      printf("Warning: %c (%d) key not recognized in pause mode.\n",key,(int)key);
+  }
+}
 void keyPressed(unsigned char key, int mouseX, int mouseY){
+  if(curState.paused) return keyPressedPaused(key,mouseX,mouseY);
   switch(key){
     case 'f':
       curState.fullscreen = !curState.fullscreen;
@@ -134,16 +268,23 @@ void keyPressed(unsigned char key, int mouseX, int mouseY){
       }
       break;
     case 'w':
-      curState.playerPosition.y++;
+      curState.player.bbox[0].y++;
+      curState.player.bbox[1].y++;
       break;
     case 's':
-      curState.playerPosition.y--;
+      curState.player.bbox[0].y--;
+      curState.player.bbox[1].y--;
       break;
     case 'a':
-      curState.playerPosition.x--;
+      curState.player.bbox[0].x--;
+      curState.player.bbox[1].x--;
       break;
     case 'd':
-      curState.playerPosition.x++;
+      curState.player.bbox[0].x++;
+      curState.player.bbox[1].x++;
+      break;
+    case 'r':
+      curState.board = Board(int(unitRandom()*20));
       break;
     case 'q':
     case 'Q':
@@ -183,7 +324,8 @@ void onResize(int width, int height){
 int main(int argc, char **argv) {
   glutInit(&argc, argv); 
   glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
-
+  
+  srand((int)std::clock()); //init rand seed
   
   //glutInitWindowPosition(50, 25);
   glutInitWindowSize(curState.resolution[0],curState.resolution[1]);
@@ -198,21 +340,40 @@ int main(int argc, char **argv) {
   glClearColor(0, 0, 0, 1);
 
   //load images
-  curState.brick1 = Texture((char*)"textures/brick.jpg");
-  curState.brick2 = Texture((char*)"textures/brick.png");
-  curState.player = SpriteSheet((char*)"textures/player.png",1,5);
-
+  Room::brick = Texture((char*)"textures/brick.jpg");
+  Texture gold = Texture((char*)"textures/gold.png");
+  //curState.brick2 = Texture((char*)"textures/brick.png");
+  curState.player.spritesheet = SpriteSheet((char*)"textures/player.png",1,5);
+;
   int animation[5] = {0,1,2,3,4};
-  curState.player.setAnimation(curState.player.addAnimation((int*)animation, 5,10));
-  curState.brick1.activate(); //set default
+  curState.player.spritesheet.setAnimation(curState.player.spritesheet.addAnimation((int*)animation, 5,50));
+  Room::brick.activate(); //set default
 
-  board = Board(1);
-  Point bbox[4];
-  bbox[0] = Point(0,0);
-  bbox[1] = Point(100,0);
-  bbox[2] = Point(100,95);
-  bbox[3] = Point(0,95);
-  board.setRoom(0,(Point*)bbox);
+  curState.board = Board(5); //init board
+  int numTreasure = int(unitRandom()*40); //init loot
+  for(int i=0;i<numTreasure;i++){
+    int roomIdx = int(unitRandom()*curState.board.numRooms);
+    Point min = curState.board.rooms[roomIdx].bbox[0],
+          max = curState.board.rooms[roomIdx].bbox[1];
+    StationaryThing loot;
+    loot.texture = gold;
+    Point c = min+(max-min)*Point(unitRandom(),unitRandom());
+    loot.bbox[0] = c-5;
+    loot.bbox[1] = c+5;
+    curState.loot.push_back(loot);
+  }
+  int numEnemies = int(unitRandom()*10);
+  for(int i=0;i<numEnemies;i++){ //init enemies
+    int roomIdx = int(unitRandom()*curState.board.numRooms);
+    Point min = curState.board.rooms[roomIdx].bbox[0],
+          max = curState.board.rooms[roomIdx].bbox[1];
+    MoveableThing enemy;
+    enemy.spritesheet = curState.player.spritesheet;
+    Point c = min+(max-min)*Point(unitRandom(),unitRandom());
+    enemy.bbox[0] = c-5;
+    enemy.bbox[1] = c+5;
+    curState.enemies.push_back(enemy);
+  }
 
   //setup callbacks
   glutReshapeFunc(onResize);
@@ -220,6 +381,11 @@ int main(int argc, char **argv) {
   glutSpecialFunc(specialKeyPressed);
   glutDisplayFunc(draw);
   glutIdleFunc(draw);
+
+  Sound::init(argc,argv);
+  Sound sound = Sound((char*)"sounds/ask_mr_hat.wav");
+  sound.play(true);
+  Sound::cleanup();
 
   glutMainLoop();
   return 0;
